@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>미로 탈출 게임</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+  <style>
+    * {
+      margin: 0; padding: 0; box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none; -webkit-user-select: none;
+    }
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #1e1e2e;
+      font-family: 'Noto Sans KR', 'Apple SD Gothic Neo', Arial, sans-serif;
+    }
+
+    /* ─────── Drawing Phase ─────── */
+    #drawing-phase {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      overflow: hidden;   /* prevent children from overflowing viewport */
+    }
+
+    #top-bar {
+      display: flex; align-items: center;
+      gap: 8px; padding: 8px 10px;
+      background: #2c2c3e;
+      min-height: 62px; flex-shrink: 0;
+      z-index: 10; flex-wrap: nowrap;
+    }
+
+    .color-wrap {
+      display: flex; flex-direction: column;
+      align-items: center; gap: 3px;
+      flex-shrink: 0;
+    }
+    .color-btn {
+      width: 44px; height: 44px; border-radius: 50%;
+      border: 3px solid transparent;
+      cursor: pointer; transition: transform 0.1s;
+      flex-shrink: 0;
+    }
+    .color-btn.active {
+      border-color: #fff;
+      transform: scale(1.18);
+      box-shadow: 0 0 8px rgba(255,255,255,0.5);
+    }
+    .color-label {
+      color: #aaa; font-size: 11px; line-height: 1;
+    }
+
+    .top-spacer { flex: 1; }
+
+    #eraser-btn {
+      padding: 8px 12px;
+      background: #4a4a5e; color: #ddd;
+      border: 2px solid transparent;
+      border-radius: 8px; font-size: 14px;
+      min-height: 44px; cursor: pointer;
+      flex-shrink: 0;
+    }
+    #eraser-btn.active {
+      background: #6a6a8e; border-color: #fff;
+    }
+    #clear-btn {
+      padding: 8px 12px;
+      background: #8b3a3a; color: #fff;
+      border: none; border-radius: 8px;
+      font-size: 14px; min-height: 44px;
+      cursor: pointer; flex-shrink: 0;
+    }
+
+    /* Drawing canvas */
+    #draw-canvas {
+      flex: 1 1 0;       /* flex-basis:0 prevents intrinsic size from overflowing */
+      min-height: 0;     /* critical: lets canvas shrink in a flex column */
+      display: block;
+      touch-action: none;
+      background: #f0ede8;
+      cursor: crosshair;
+    }
+
+    /* ─────── Bottom Bar ─────── */
+    #bottom-bar {
+      display: flex; align-items: center;
+      gap: 10px; padding: 8px 12px;
+      background: #2c2c3e;
+      min-height: 66px; flex-shrink: 0;
+      z-index: 10;
+    }
+    #permission-btn {
+      padding: 10px 14px;
+      background: #1976D2; color: #fff;
+      border: none; border-radius: 10px;
+      font-size: 14px; min-height: 48px;
+      cursor: pointer; flex-shrink: 0;
+      line-height: 1.3; text-align: center;
+    }
+    #start-btn {
+      flex: 1; min-height: 52px;
+      font-size: 20px; font-weight: bold;
+      background: linear-gradient(135deg, #43A047, #1B5E20);
+      color: #fff; border: none; border-radius: 12px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(67,160,71,0.4);
+    }
+
+    /* ─────── Guide text ─────── */
+    #guide-text {
+      position: absolute;
+      top: 70px; left: 50%; transform: translateX(-50%);
+      color: rgba(0,0,0,0.35);
+      font-size: 15px; text-align: center;
+      pointer-events: none;
+      line-height: 1.7;
+      white-space: nowrap;
+    }
+
+    /* ─────── Game Phase ─────── */
+    #game-phase {
+      position: fixed; inset: 0;
+      display: none;
+    }
+    #game-phase canvas { display: block; }
+
+    /* ─────── Win Overlay ─────── */
+    #win-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.8);
+      display: none; flex-direction: column;
+      justify-content: center; align-items: center;
+      z-index: 300;
+      opacity: 0; transition: opacity 0.5s;
+    }
+    #win-overlay.show { opacity: 1; }
+    #win-emoji { font-size: 80px; margin-bottom: 8px; }
+    #win-title {
+      font-size: 54px; font-weight: bold;
+      color: #FFD700;
+      text-shadow: 0 0 30px #FFD700, 0 0 60px #FF8800;
+      margin-bottom: 32px;
+    }
+    #replay-btn {
+      padding: 16px 52px;
+      font-size: 24px; font-weight: bold;
+      background: linear-gradient(135deg, #43A047, #1B5E20);
+      color: #fff; border: none; border-radius: 16px;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(67,160,71,0.5);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ═══════════════ DRAWING PHASE ═══════════════ -->
+  <div id="drawing-phase">
+    <div id="top-bar">
+      <!-- Wall (black) -->
+      <div class="color-wrap">
+        <button class="color-btn active" id="btn-black"
+          style="background:#222;" aria-label="벽 그리기"></button>
+        <span class="color-label">벽</span>
+      </div>
+      <!-- Start (green) -->
+      <div class="color-wrap">
+        <button class="color-btn" id="btn-green"
+          style="background:#43A047;" aria-label="출발점 그리기"></button>
+        <span class="color-label">출발</span>
+      </div>
+      <!-- Goal (red) -->
+      <div class="color-wrap">
+        <button class="color-btn" id="btn-red"
+          style="background:#E53935;" aria-label="도착점 그리기"></button>
+        <span class="color-label">도착</span>
+      </div>
+
+      <div class="top-spacer"></div>
+
+      <button id="eraser-btn">지우개</button>
+      <button id="clear-btn">전체<br>지우기</button>
+    </div>
+
+    <canvas id="draw-canvas"></canvas>
+
+    <div id="bottom-bar">
+      <button id="permission-btn">센서<br>권한 허용</button>
+      <button id="start-btn">게임 시작 ▶</button>
+    </div>
+
+    <div id="guide-text">
+      검정으로 <strong>벽</strong>을 그리고, 초록으로 <strong>출발</strong>, 빨강으로 <strong>도착</strong>을 표시하세요!
+    </div>
+  </div>
+
+  <!-- ═══════════════ GAME PHASE ═══════════════ -->
+  <div id="game-phase"></div>
+
+  <!-- ═══════════════ WIN OVERLAY ═══════════════ -->
+  <div id="win-overlay">
+    <div id="win-emoji">🎉</div>
+    <div id="win-title">성공!</div>
+    <button id="replay-btn">다시하기 ↺</button>
+  </div>
+
+<script>
+'use strict';
+
+// ════════════════════════════════════════════════
+//  CONSTANTS
+// ════════════════════════════════════════════════
+const COLOR_WALL  = '#1a1a1a';
+const COLOR_START = '#43A047';
+const COLOR_GOAL  = '#E53935';
+const WALL_THICK  = 6;    // drawing line width (CSS px)
+const MIN_DECIMATE = 5;   // min px distance between physics points
+const ERASE_RADIUS = 28;  // eraser hit radius (CSS px)
+
+// ════════════════════════════════════════════════
+//  DRAWING STATE
+// ════════════════════════════════════════════════
+const DS = {
+  canvas:       null,
+  ctx:          null,
+  color:        COLOR_WALL,
+  erasing:      false,
+  drawing:      false,
+  stroke:       [],                 // current touch path [{x,y}]
+  strokes:      [],                 // finished [{color, pts:[{x,y}]}]
+};
+
+// ────────────────────────────────────────────────
+//  Canvas init & resize
+// ────────────────────────────────────────────────
+function initCanvas() {
+  DS.canvas = document.getElementById('draw-canvas');
+  DS.ctx    = DS.canvas.getContext('2d');
+  resizeCanvas();
+
+  DS.canvas.addEventListener('touchstart',  onTS, { passive: false });
+  DS.canvas.addEventListener('touchmove',   onTM, { passive: false });
+  DS.canvas.addEventListener('touchend',    onTE, { passive: false });
+  DS.canvas.addEventListener('touchcancel', onTE, { passive: false });
+
+  // Mouse fallback (desktop testing)
+  DS.canvas.addEventListener('mousedown', e => startAt(e.clientX, e.clientY));
+  DS.canvas.addEventListener('mousemove', e => { if (DS.drawing) moveAt(e.clientX, e.clientY); });
+  DS.canvas.addEventListener('mouseup',   () => endDraw());
+  DS.canvas.addEventListener('mouseleave',() => endDraw());
+}
+
+function resizeCanvas() {
+  const dpr  = window.devicePixelRatio || 1;
+  const rect  = DS.canvas.getBoundingClientRect();
+  DS.canvas.width  = rect.width  * dpr;
+  DS.canvas.height = rect.height * dpr;
+  DS.ctx.scale(dpr, dpr);
+  redrawAll();
+}
+
+// ────────────────────────────────────────────────
+//  Touch handlers
+// ────────────────────────────────────────────────
+function onTS(e) {
+  e.preventDefault();
+  startAt(e.touches[0].clientX, e.touches[0].clientY);
+}
+function onTM(e) {
+  e.preventDefault();
+  moveAt(e.touches[0].clientX, e.touches[0].clientY);
+}
+function onTE(e) {
+  e.preventDefault();
+  endDraw();
+}
+
+function cssXY(clientX, clientY) {
+  const r = DS.canvas.getBoundingClientRect();
+  return { x: clientX - r.left, y: clientY - r.top };
+}
+
+function startAt(cx, cy) {
+  DS.drawing = true;
+  const pt = cssXY(cx, cy);
+  DS.stroke = [pt];
+  if (!DS.erasing) drawDot(pt, DS.color);
+}
+
+function moveAt(cx, cy) {
+  if (!DS.drawing) return;
+  const pt   = cssXY(cx, cy);
+  const prev = DS.stroke[DS.stroke.length - 1];
+
+  if (DS.erasing) {
+    applyErase(pt);
+  } else {
+    DS.stroke.push(pt);
+    drawSeg(prev, pt, DS.color, WALL_THICK);
+  }
+}
+
+function endDraw() {
+  if (!DS.drawing) return;
+  DS.drawing = false;
+  if (!DS.erasing && DS.stroke.length >= 1) {
+    DS.strokes.push({ color: DS.color, pts: [...DS.stroke] });
+  }
+  DS.stroke = [];
+  // hide guide after first stroke
+  const g = document.getElementById('guide-text');
+  if (g && DS.strokes.length > 0) g.style.display = 'none';
+}
+
+// ────────────────────────────────────────────────
+//  Drawing helpers
+// ────────────────────────────────────────────────
+function drawSeg(p1, p2, color, width) {
+  const ctx = DS.ctx;
+  ctx.beginPath();
+  ctx.moveTo(p1.x, p1.y);
+  ctx.lineTo(p2.x, p2.y);
+  ctx.strokeStyle = color;
+  ctx.lineWidth   = width;
+  ctx.lineCap     = 'round';
+  ctx.lineJoin    = 'round';
+  ctx.stroke();
+}
+
+function drawDot(p, color) {
+  const ctx = DS.ctx;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, WALL_THICK / 2, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function redrawAll() {
+  const cv = DS.canvas;
+  DS.ctx.clearRect(0, 0, cv.width, cv.height);
+  for (const s of DS.strokes) {
+    if (s.pts.length === 1) {
+      drawDot(s.pts[0], s.color);
+    } else {
+      for (let i = 1; i < s.pts.length; i++) {
+        drawSeg(s.pts[i-1], s.pts[i], s.color, WALL_THICK);
+      }
+    }
+  }
+}
+
+// ────────────────────────────────────────────────
+//  Eraser
+// ────────────────────────────────────────────────
+function applyErase(ept) {
+  const r2 = ERASE_RADIUS * ERASE_RADIUS;
+  const newStrokes = [];
+
+  for (const s of DS.strokes) {
+    const segs = splitStroke(s, ept, r2);
+    newStrokes.push(...segs);
+  }
+
+  DS.strokes = newStrokes;
+  redrawAll();
+}
+
+function splitStroke(stroke, ept, r2) {
+  const out = [];
+  let cur   = [];
+
+  for (const p of stroke.pts) {
+    const dx = p.x - ept.x, dy = p.y - ept.y;
+    if (dx*dx + dy*dy < r2) {
+      // erased point → flush current segment
+      if (cur.length >= 1) out.push({ color: stroke.color, pts: cur });
+      cur = [];
+    } else {
+      cur.push(p);
+    }
+  }
+  if (cur.length >= 1) out.push({ color: stroke.color, pts: cur });
+  return out;
+}
+
+// ────────────────────────────────────────────────
+//  Color / Eraser buttons
+// ────────────────────────────────────────────────
+function initButtons() {
+  const colorMap = {
+    'btn-black': COLOR_WALL,
+    'btn-green': COLOR_START,
+    'btn-red':   COLOR_GOAL,
+  };
+
+  for (const [id, col] of Object.entries(colorMap)) {
+    document.getElementById(id).addEventListener('click', () => {
+      DS.color   = col;
+      DS.erasing = false;
+      document.getElementById('eraser-btn').classList.remove('active');
+      document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+    });
+  }
+
+  document.getElementById('eraser-btn').addEventListener('click', () => {
+    DS.erasing = !DS.erasing;
+    document.getElementById('eraser-btn').classList.toggle('active', DS.erasing);
+    document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+  });
+
+  document.getElementById('clear-btn').addEventListener('click', () => {
+    DS.strokes = [];
+    redrawAll();
+    const g = document.getElementById('guide-text');
+    if (g) g.style.display = '';
+  });
+}
+
+// ════════════════════════════════════════════════
+//  SENSOR PERMISSION
+// ════════════════════════════════════════════════
+// Android: deviceorientation은 정지 상태에서 이벤트를 보내지 않는다.
+// 따라서 "버튼을 눌러 감지" 방식 대신,
+// 버튼은 iOS 권한 요청용으로만 쓰고
+// Android는 페이지 로드 직후 리스너를 달아 첫 이벤트 때 버튼 상태를 갱신한다.
+
+function startSensorWatch() {
+  const btn = document.getElementById('permission-btn');
+
+  // iOS 13+: requestPermission API가 있으면 버튼 클릭까지 대기
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    return;
+  }
+
+  // ── content:// URI → 센서 차단 감지 ─────────────
+  // Android에서 "내 파일" 앱 등 기본 파일관리자로 열면
+  // content:// URL이 되어 Chrome/삼성인터넷 모두 센서를 차단함.
+  // 해결: 내부적으로 127.0.0.1 서버를 통해 파일을 여는 앱 사용.
+  const href = location.href;
+  const isBadUrl = href.startsWith('content://');
+  if (isBadUrl) {
+    btn.textContent = '⚠ 열기 방법 변경 필요';
+    btn.style.background = '#E65100';
+    btn.style.fontSize = '11px';
+    btn.style.whiteSpace = 'normal';
+    btn.style.lineHeight = '1.3';
+
+    const warn = document.createElement('div');
+    warn.style.cssText = [
+      'position:fixed', 'top:0', 'left:0', 'right:0',
+      'background:#BF360C', 'color:#fff', 'font-size:15px',
+      'padding:14px 16px', 'z-index:999', 'text-align:center',
+      'line-height:1.8',
+    ].join(';');
+    warn.innerHTML =
+      '⚠ <strong>센서 차단됨</strong> — "내 파일" 앱으로 열면 센서가 막힙니다.<br>' +
+      '현재 URL: <code style="font-size:12px;background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:3px">' +
+        href.slice(0, 40) + '…</code><br>' +
+      '<strong>✅ 해결:</strong> 주소창이 <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:3px">http://127.0.0.1:…</code> 로 표시되는<br>' +
+      '파일관리 앱으로 열어주세요. (S21에서 쓰시는 그 앱을 탭A에도 설치)';
+    document.body.appendChild(warn);
+    return;
+  }
+
+  btn.textContent = '센서 대기 중…';
+
+  let confirmed = false;
+  function confirm(label) {
+    if (confirmed) return;
+    confirmed = true;
+    btn.textContent = label;
+    btn.style.background = '#388E3C';
+    btn.style.fontSize = '';
+  }
+
+  // 1순위: deviceorientation (자이로스코프 있는 기기 — 갤럭시S21 등)
+  const onOrientation = (e) => {
+    if (typeof e.gamma === 'number' || typeof e.beta === 'number') {
+      window.removeEventListener('deviceorientation', onOrientation);
+      confirm('자이로 연결됨 ✓');
+    }
+  };
+
+  // 2순위: devicemotion (가속도계만 있는 기기 — 갤럭시탭A 등)
+  // 기기를 기울이면 x/y 값이 변하므로 움직임이 있어야 감지됨
+  const onMotion = (e) => {
+    if (confirmed) { window.removeEventListener('devicemotion', onMotion); return; }
+    const ag = e.accelerationIncludingGravity;
+    if (ag && typeof ag.x === 'number' && ag.x !== null) {
+      window.removeEventListener('devicemotion', onMotion);
+      confirm('가속도계 연결됨 ✓');
+    }
+  };
+
+  window.addEventListener('deviceorientation', onOrientation);
+  window.addEventListener('devicemotion',      onMotion);
+}
+
+async function requestPermission() {
+  const btn = document.getElementById('permission-btn');
+
+  // iOS 13+: 사용자 터치로만 호출 가능한 권한 요청
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      const res = await DeviceOrientationEvent.requestPermission();
+      if (res === 'granted') {
+        btn.textContent = '센서 허용됨 ✓';
+        btn.style.background = '#388E3C';
+      } else {
+        btn.textContent = '권한 거부됨';
+        btn.style.background = '#757575';
+        alert('센서 권한이 거부되었습니다.\n기기를 기울여도 공이 움직이지 않을 수 있습니다.');
+      }
+    } catch (err) {
+      console.warn('Permission request error:', err);
+    }
+    return;
+  }
+
+  // Android: 버튼 클릭 시에는 이미 리스너가 등록되어 있음.
+  // HTTPS 여부만 안내
+  if (!window.isSecureContext) {
+    alert(
+      '현재 HTTP 환경입니다.\n\n' +
+      '자이로 센서가 작동하지 않으면:\n' +
+      '• 파일을 폰에 직접 복사 후 파일 앱으로 열기\n' +
+      '• 또는 HTTPS 서버에 업로드\n\n' +
+      '지금은 게임을 시작하고 폰을 기울여보세요!'
+    );
+  } else {
+    btn.textContent = '기울이면 연결됨';
+    btn.style.fontSize = '12px';
+  }
+}
+
+// ════════════════════════════════════════════════
+//  PHYSICS DATA CONVERSION
+// ════════════════════════════════════════════════
+function decimatePts(pts) {
+  if (!pts.length) return [];
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const l = out[out.length - 1];
+    const dx = pts[i].x - l.x, dy = pts[i].y - l.y;
+    if (dx*dx + dy*dy >= MIN_DECIMATE * MIN_DECIMATE) out.push(pts[i]);
+  }
+  return out;
+}
+
+function segDesc(p1, p2) {
+  const dx = p2.x - p1.x, dy = p2.y - p1.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1) return null;
+  return {
+    cx:     (p1.x + p2.x) / 2,
+    cy:     (p1.y + p2.y) / 2,
+    width:  len,
+    height: WALL_THICK,
+    angle:  Math.atan2(dy, dx),
+  };
+}
+
+function centroid(pts) {
+  if (!pts.length) return null;
+  return {
+    x: pts.reduce((s, p) => s + p.x, 0) / pts.length,
+    y: pts.reduce((s, p) => s + p.y, 0) / pts.length,
+  };
+}
+
+// 도착 지점: 바운딩박스에 내접하는 원 (그림 영역을 벗어나지 않음)
+function goalCirclePts(pts) {
+  if (!pts.length) return null;
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  for (const p of pts) {
+    if (p.x < x1) x1 = p.x; if (p.y < y1) y1 = p.y;
+    if (p.x > x2) x2 = p.x; if (p.y > y2) y2 = p.y;
+  }
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  // 내접원: 짧은 변의 절반을 반지름으로 (그림 밖으로 나가지 않음)
+  const r  = Math.min(x2 - x1, y2 - y1) / 2;
+  return { cx, cy, r: Math.max(r, 20) }; // 최소 20px
+}
+
+function buildPhysicsData() {
+  const walls = [], startPts = [], goalPts = [];
+
+  for (const s of DS.strokes) {
+    const pts = decimatePts(s.pts);
+    if (s.color === COLOR_WALL) {
+      for (let i = 1; i < pts.length; i++) {
+        const d = segDesc(pts[i-1], pts[i]);
+        if (d) walls.push(d);
+      }
+      // single dot → tiny circle placeholder
+      if (pts.length === 1) {
+        walls.push({ cx: pts[0].x, cy: pts[0].y, width: WALL_THICK, height: WALL_THICK, angle: 0 });
+      }
+    } else if (s.color === COLOR_START) {
+      startPts.push(...pts);
+    } else if (s.color === COLOR_GOAL) {
+      goalPts.push(...pts);
+    }
+  }
+
+  const W = window.innerWidth, H = window.innerHeight;
+  const ballSpawn = centroid(startPts)      ?? { x: 80, y: 100 };
+  const goalCircle = goalCirclePts(goalPts) ?? { cx: W-80, cy: H-180, r: 36 };
+
+  return { walls, ballSpawn, goalCircle };
+}
+
+// ════════════════════════════════════════════════
+//  PHASER GAME
+// ════════════════════════════════════════════════
+let phaserGame = null;
+let physData   = null;
+
+function startGame() {
+  physData = buildPhysicsData();
+
+  document.getElementById('drawing-phase').style.display = 'none';
+  const gp = document.getElementById('game-phase');
+  gp.style.display = 'block';
+
+  phaserGame = new Phaser.Game({
+    type:            Phaser.AUTO,
+    parent:          'game-phase',
+    backgroundColor: '#f0ede8',
+    scale: {
+      mode:       Phaser.Scale.RESIZE,
+      autoCenter: Phaser.Scale.CENTER_BOTH,
+    },
+    physics: {
+      default: 'matter',
+      matter:  { gravity: { x: 0, y: 1 }, debug: false },
+    },
+    scene: [GameScene],
+  });
+}
+
+// ════════════════════════════════════════════════
+//  PHASER SCENE
+// ════════════════════════════════════════════════
+class GameScene extends Phaser.Scene {
+  constructor() {
+    super({ key: 'GameScene' });
+    this.ball        = null;
+    this.gyroHandler = null;
+    this.won         = false;
+    this.gravX       = 0;
+    this.gravY       = 1;
+  }
+
+  preload() {
+    // 공 면적 = 원래의 1/2  →  r_new = r_old / √2 = 18/√2 ≈ 13
+    const sz = 28, r = sz / 2;   // 텍스처 28×28, 반지름 14
+    const g = this.make.graphics({ x: 0, y: 0, add: false });
+    g.fillStyle(0x2979FF); g.fillCircle(r, r, r - 1);
+    g.fillStyle(0x82B1FF); g.fillCircle(r - 5, r - 5, r / 3.5);
+    g.generateTexture('ball', sz, sz);
+    g.destroy();
+  }
+
+  create() {
+    const W = this.scale.width, H = this.scale.height;
+    const { walls, ballSpawn, goalCircle } = physData;
+
+    // ── Background grid (decorative) ──
+    this.drawBackground(W, H);
+
+    // ── Draw wall visuals from original strokes ──
+    this.drawStrokes();
+
+    // ── Physics bodies ──
+    this.createBorders(W, H);
+    this.createWalls(walls);
+    this.createGoal(goalCircle);
+    this.createBall(ballSpawn);
+
+    // ── Win detection ──
+    this.setupCollision();
+
+    // ── Controls ──
+    this.setupGyro();
+    this.setupKeyboard();
+
+    // ── HUD ──
+    this.hintText = this.add.text(W / 2, 24, '기울여서 공을 굴리세요! 🌀', {
+      fontSize: '15px', color: '#666', backgroundColor: 'rgba(255,255,255,0.7)',
+      padding: { x: 10, y: 5 }, borderRadius: 6,
+    }).setOrigin(0.5, 0).setDepth(20);
+
+    this.time.delayedCall(3000, () => {
+      if (this.hintText) this.tweens.add({
+        targets: this.hintText, alpha: 0, duration: 800,
+        onComplete: () => { if (this.hintText) this.hintText.destroy(); }
+      });
+    });
+  }
+
+  // ── Background ──────────────────────────────────
+  drawBackground(W, H) {
+    const g = this.add.graphics().setDepth(0);
+    g.fillStyle(0xf0ede8); g.fillRect(0, 0, W, H);
+    // faint grid
+    g.lineStyle(1, 0xd8d4ce, 0.5);
+    for (let x = 40; x < W; x += 40) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.strokePath(); }
+    for (let y = 40; y < H; y += 40) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.strokePath(); }
+  }
+
+  // ── Render original drawings ─────────────────────
+  drawStrokes() {
+    const g = this.add.graphics().setDepth(1);
+    for (const s of DS.strokes) {
+      if (!s.pts.length) continue;
+      let hex;
+      if      (s.color === COLOR_WALL)  hex = 0x222222;
+      else if (s.color === COLOR_START) hex = 0x388E3C;
+      else                               hex = 0xC62828;
+
+      if (s.pts.length === 1) {
+        g.fillStyle(hex);
+        g.fillCircle(s.pts[0].x, s.pts[0].y, WALL_THICK / 2);
+      } else {
+        g.lineStyle(WALL_THICK, hex, 1);
+        g.beginPath();
+        g.moveTo(s.pts[0].x, s.pts[0].y);
+        for (let i = 1; i < s.pts.length; i++) g.lineTo(s.pts[i].x, s.pts[i].y);
+        g.strokePath();
+      }
+    }
+  }
+
+  // ── Border walls ─────────────────────────────────
+  createBorders(W, H) {
+    const T = 24;
+    const o = { isStatic: true, label: 'border', friction: 0.1, restitution: 0.3 };
+    this.matter.add.rectangle(W/2,      -T/2,      W + T*2, T, o);  // top
+    this.matter.add.rectangle(W/2,      H + T/2,   W + T*2, T, o);  // bottom
+    this.matter.add.rectangle(-T/2,     H/2,       T, H + T*2, o);  // left
+    this.matter.add.rectangle(W + T/2,  H/2,       T, H + T*2, o);  // right
+  }
+
+  // ── Drawn walls → physics ────────────────────────
+  createWalls(walls) {
+    const MB = Phaser.Physics.Matter.Matter.Body;
+    for (const w of walls) {
+      if (w.width < 2) continue;
+      const body = this.matter.add.rectangle(w.cx, w.cy, w.width, w.height, {
+        isStatic:     true,
+        label:        'wall',
+        friction:     0.4,
+        restitution:  0.15,
+        frictionStatic: 0.5,
+      });
+      MB.setAngle(body, w.angle);
+    }
+  }
+
+  // ── Goal zone ────────────────────────────────────
+  createGoal(gc) {
+    const { cx, cy, r } = gc;
+
+    // 시각: 박동하는 반투명 원
+    const circle = this.add.circle(cx, cy, r, 0xEF5350, 0.30).setDepth(2);
+    circle.setStrokeStyle(3, 0xC62828, 1);
+    this.tweens.add({
+      targets: circle, alpha: { from: 0.30, to: 0.60 },
+      duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+    });
+    this.add.text(cx, cy, '🏁', {
+      fontSize: `${r * 1.1}px`,
+    }).setOrigin(0.5).setDepth(3);
+
+    // 물리 센서: 원형, 그림 내부에 딱 맞음
+    this.goalBody = this.matter.add.circle(cx, cy, r, {
+      isStatic: true, isSensor: true, label: 'goal',
+    });
+  }
+
+  // ── Ball ─────────────────────────────────────────
+  createBall(sp) {
+    this.ball = this.matter.add.image(sp.x, sp.y, 'ball');
+    this.ball.setCircle(13);          // 물리 반지름 13 (면적 = 기존 18² × π 의 절반)
+    this.ball.body.label = 'ball-body';
+    this.ball.setMass(1).setFriction(0.05).setBounce(0.45).setFrictionAir(0.012);
+    this.ball.setDepth(15);
+
+    // spawn flash
+    const ring = this.add.circle(sp.x, sp.y, 18, 0x388E3C, 0.0).setDepth(14);
+    ring.setStrokeStyle(3, 0x388E3C, 0.8);
+    this.tweens.add({
+      targets: ring, scaleX: 2, scaleY: 2, alpha: 0,
+      duration: 800, ease: 'Quad.easeOut',
+      onComplete: () => ring.destroy(),
+    });
+  }
+
+  // ── Collision / win ──────────────────────────────
+  setupCollision() {
+    this.matter.world.on('collisionstart', (event) => {
+      if (this.won) return;
+      for (const pair of event.pairs) {
+        const la = pair.bodyA.label, lb = pair.bodyB.label;
+        if ((la === 'goal' && lb === 'ball-body') ||
+            (lb === 'goal' && la === 'ball-body')) {
+          this.triggerWin();
+          return;
+        }
+      }
+    });
+  }
+
+  triggerWin() {
+    if (this.won) return;
+    this.won = true;
+
+    // freeze
+    this.matter.world.setGravity(0, 0);
+    if (this.ball && this.ball.body) {
+      Phaser.Physics.Matter.Matter.Body.setVelocity(this.ball.body, { x: 0, y: 0 });
+      this.ball.setStatic(true);
+    }
+
+    // particle burst
+    try {
+      const em = this.add.particles(this.ball.x, this.ball.y, 'ball', {
+        speed:    { min: 60, max: 260 },
+        angle:    { min: 0, max: 360 },
+        scale:    { start: 0.7, end: 0 },
+        lifespan: { min: 600, max: 1100 },
+        tint:     [0xFFD700, 0xFF6B6B, 0x4ECDC4, 0x45B7D1, 0xFF69B4, 0x98FB98],
+        gravityY: 300,
+      });
+      em.explode(55);
+    } catch (e) {
+      /* Particle API variant — skip gracefully */
+    }
+
+    // show overlay
+    this.time.delayedCall(650, () => {
+      if (this.gyroHandler)  window.removeEventListener('deviceorientation', this.gyroHandler);
+      if (this.motionHandler) window.removeEventListener('devicemotion',     this.motionHandler);
+      const ov = document.getElementById('win-overlay');
+      ov.style.display = 'flex';
+      requestAnimationFrame(() => ov.classList.add('show'));
+    });
+  }
+
+  // ── Gyroscope / Accelerometer ────────────────────
+  setupGyro() {
+    // ┌─────────────────────────────────────────────────────┐
+    // │ 전략: deviceorientation 우선, devicemotion 보조      │
+    // │                                                     │
+    // │ • Chrome은 자이로 없는 기기에서도 가속도계+자기계로  │
+    // │   deviceorientation(alpha/beta/gamma)를 합성함      │
+    // │ • _lastOrientTs: 마지막으로 유효한 orientation 이벤트│
+    // │   시각. motionHandler는 이게 오래되었을 때만 적용.   │
+    // │ • _usingMotion 같은 "한번 세팅 후 고정" 플래그 금지  │
+    // └─────────────────────────────────────────────────────┘
+    this._lastOrientTs = 0;
+
+    const oa = () =>
+      (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+
+    // ── 1순위: deviceorientation (자이로스코프 있는 기기) ──
+    this.gyroHandler = (e) => {
+      if (this.won) return;
+      if (typeof e.gamma !== 'number' || typeof e.beta !== 'number') return;
+
+      let gamma = Math.max(-50, Math.min(50, e.gamma));
+      let beta  = Math.max(-50, Math.min(50, e.beta));
+
+      // ★ 핵심 수정: 자이로 없는 기기(탭A 등)는 gamma=0, beta=0을
+      //   항상 반환한다. 이 경우 _lastOrientTs를 갱신하지 않아야
+      //   motionHandler가 차단되지 않는다.
+      //   임계값 1° 미만이면 "실제 자이로 데이터 없음"으로 간주.
+      const hasTilt = Math.abs(gamma) > 1.0 || Math.abs(beta) > 1.0;
+      if (!hasTilt) return;   // 갱신 없이 즉시 리턴 → motionHandler 활성 유지
+
+      let gx, gy;
+      const angle = oa();
+      if (angle === 90) {
+        gx = -(beta  / 50) * 2.2;
+        gy =  (gamma / 50) * 2.2;
+      } else if (angle === -90 || angle === 270) {
+        gx =  (beta  / 50) * 2.2;
+        gy = -(gamma / 50) * 2.2;
+      } else {
+        gx = (gamma / 50) * 2.2;
+        gy = (beta  / 50) * 2.2;
+      }
+
+      this._lastOrientTs = performance.now(); // 실제 기울기가 있을 때만 갱신
+      this.gravX = gx; this.gravY = gy;
+      this.matter.world.setGravity(gx, gy);
+    };
+
+    // ── 2순위: devicemotion / accelerationIncludingGravity ──
+    //   자이로 없는 기기(탭A)의 fallback. 가속도계만으로 동작.
+    //   gyroHandler가 실제 기울기를 200ms 내에 감지했으면 건너뜀.
+    this.motionHandler = (e) => {
+      if (this.won) return;
+      if (performance.now() - this._lastOrientTs < 200) return;
+
+      const ag = e.accelerationIncludingGravity;
+      if (!ag || ag.x == null || ag.y == null) return;
+
+      // Android Chrome의 accelerationIncludingGravity 부호 규칙:
+      //   오른쪽으로 기울이면 ag.x < 0  →  gx = -ag.x (양수)
+      //   앞으로 기울이면(화면 위쪽이 내려감) ag.y < 0  →  gy = ag.y (음수 = 위 방향)
+      const S = 2.2 / 9.8;
+      let gx, gy;
+      const angle = oa();
+      if (angle === 90) {
+        gx = -ag.y * S;
+        gy = -ag.x * S;
+      } else if (angle === -90 || angle === 270) {
+        gx =  ag.y * S;
+        gy =  ag.x * S;
+      } else {
+        gx = -ag.x * S;
+        gy = -ag.y * S;   // 부호 반전: ag.y는 중력의 반대 방향(반발력)이므로 음수 적용
+      }
+
+      this.gravX = gx; this.gravY = gy;
+      this.matter.world.setGravity(gx, gy);
+    };
+
+    window.addEventListener('deviceorientation', this.gyroHandler);
+    window.addEventListener('devicemotion',      this.motionHandler);
+  }
+
+  // ── Keyboard fallback (desktop) ──────────────────
+  setupKeyboard() {
+    const keys = this.input.keyboard.addKeys({
+      up:    Phaser.Input.Keyboard.KeyCodes.UP,
+      down:  Phaser.Input.Keyboard.KeyCodes.DOWN,
+      left:  Phaser.Input.Keyboard.KeyCodes.LEFT,
+      right: Phaser.Input.Keyboard.KeyCodes.RIGHT,
+      w: Phaser.Input.Keyboard.KeyCodes.W,
+      s: Phaser.Input.Keyboard.KeyCodes.S,
+      a: Phaser.Input.Keyboard.KeyCodes.A,
+      d: Phaser.Input.Keyboard.KeyCodes.D,
+    });
+    this.keyboardKeys = keys;
+  }
+
+  update() {
+    if (this.won) return;
+    const k   = this.keyboardKeys;
+    const spd = 0.12;
+
+    if (k.left.isDown  || k.a.isDown) this.gravX = Math.max(-2.2, this.gravX - spd);
+    if (k.right.isDown || k.d.isDown) this.gravX = Math.min( 2.2, this.gravX + spd);
+    if (k.up.isDown    || k.w.isDown) this.gravY = Math.max(-2.2, this.gravY - spd);
+    if (k.down.isDown  || k.s.isDown) this.gravY = Math.min( 2.2, this.gravY + spd);
+
+    // return to neutral when no key pressed
+    if (!k.left.isDown && !k.a.isDown && !k.right.isDown && !k.d.isDown)
+      this.gravX *= 0.85;
+    if (!k.up.isDown && !k.w.isDown && !k.down.isDown && !k.s.isDown)
+      this.gravY = this.gravY * 0.85 + 0.15;  // bias toward slight downward
+
+    const anyKey = k.left.isDown || k.right.isDown || k.up.isDown || k.down.isDown ||
+                   k.a.isDown || k.d.isDown || k.w.isDown || k.s.isDown;
+    if (anyKey) this.matter.world.setGravity(this.gravX, this.gravY);
+  }
+
+  // ── Cleanup ──────────────────────────────────────
+  shutdown() {
+    if (this.gyroHandler)  window.removeEventListener('deviceorientation', this.gyroHandler);
+    if (this.motionHandler) window.removeEventListener('devicemotion',     this.motionHandler);
+  }
+}
+
+// ════════════════════════════════════════════════
+//  REPLAY
+// ════════════════════════════════════════════════
+function setupReplay() {
+  document.getElementById('replay-btn').addEventListener('click', () => {
+    const ov = document.getElementById('win-overlay');
+    ov.classList.remove('show');
+    setTimeout(() => { ov.style.display = 'none'; }, 500);
+
+    document.getElementById('game-phase').style.display = 'none';
+
+    if (phaserGame) {
+      phaserGame.destroy(true);
+      phaserGame = null;
+    }
+
+    DS.strokes = [];
+    redrawAll();
+
+    const g = document.getElementById('guide-text');
+    if (g) g.style.display = '';
+
+    document.getElementById('drawing-phase').style.display = 'flex';
+  });
+}
+
+// ════════════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  initCanvas();
+  initButtons();
+  setupReplay();
+
+  // Android: 페이지 로드 즉시 센서 리스너 시작 (정지 상태에서도 나중에 연결됨)
+  startSensorWatch();
+
+  document.getElementById('permission-btn')
+    .addEventListener('click', requestPermission);
+
+  document.getElementById('start-btn')
+    .addEventListener('click', startGame);
+
+  window.addEventListener('resize', () => {
+    resizeCanvas();
+  });
+});
+</script>
+</body>
+</html>
