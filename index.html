@@ -886,18 +886,18 @@ class GameScene extends Phaser.Scene {
       const S = 2.2 / 9.8;
       let gx, gy;
       const angle = oa();
+      // Android Chrome: accelerationIncludingGravity는 중력 반발력(reaction force).
+      // 세로로 세우면 ag.y ≈ +9.8 (위 방향) → gy = ag.y → 아래로 낙하 ✓
+      // 부호 반전(-ag)하면 음수가 되어 공이 위로 뜸.
       if (angle === 90) {
-        // 가로(왼쪽이 위): 축 교환
-        gx = -ag.y * S;
+        gx =  ag.y * S;
         gy = -ag.x * S;
       } else if (angle === -90 || angle === 270) {
-        // 가로(오른쪽이 위): 축 교환 + 부호 반전
-        gx =  ag.y * S;
+        gx = -ag.y * S;
         gy =  ag.x * S;
       } else {
-        // 세로(기본): ag.y 음수 → gy 양수 → 아래로 낙하 ✓
-        gx = -ag.x * S;
-        gy = -ag.y * S;
+        gx =  ag.x * S;
+        gy =  ag.y * S;
       }
 
       this.gravX = gx; this.gravY = gy;
