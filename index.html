@@ -856,86 +856,55 @@ class GameScene extends Phaser.Scene {
 
   // ── Gyroscope / Accelerometer ────────────────────
   setupGyro() {
-    // ┌─────────────────────────────────────────────────────┐
-    // │ 전략: deviceorientation 우선, devicemotion 보조      │
-    // │                                                     │
-    // │ • Chrome은 자이로 없는 기기에서도 가속도계+자기계로  │
-    // │   deviceorientation(alpha/beta/gamma)를 합성함      │
-    // │ • _lastOrientTs: 마지막으로 유효한 orientation 이벤트│
-    // │   시각. motionHandler는 이게 오래되었을 때만 적용.   │
-    // │ • _usingMotion 같은 "한번 세팅 후 고정" 플래그 금지  │
-    // └─────────────────────────────────────────────────────┘
-    this._lastOrientTs = 0;
+    // ┌─────────────────────────────────────────────────────────────────┐
+    // │ 전략: devicemotion 단독 사용                                     │
+    // │                                                                 │
+    // │ deviceorientation(beta/gamma)은 기기마다 부호가 다르다:          │
+    // │  - Galaxy S21: 세로 세우면 beta≈+90                             │
+    // │  - Galaxy Tab A(Chrome 합성): 세로 세우면 beta≈-90              │
+    // │ 같은 코드로 반대 동작이 나오므로 deviceorientation은 사용 안 함. │
+    // │                                                                 │
+    // │ accelerationIncludingGravity는 Android Chrome에서 부호가 일관적: │
+    // │  - 세로 세우면 ag.y ≈ -9.8 → gy = -ag.y = +9.8 → 아래 낙하 ✓  │
+    // └─────────────────────────────────────────────────────────────────┘
 
     const oa = () =>
       (screen.orientation && screen.orientation.angle) || window.orientation || 0;
 
-    // ── 1순위: deviceorientation (자이로스코프 있는 기기) ──
-    this.gyroHandler = (e) => {
-      if (this.won) return;
-      if (typeof e.gamma !== 'number' || typeof e.beta !== 'number') return;
+    // deviceorientation은 물리 제어에 사용하지 않음
+    this.gyroHandler = null;
 
-      let gamma = Math.max(-50, Math.min(50, e.gamma));
-      let beta  = Math.max(-50, Math.min(50, e.beta));
-
-      // ★ 핵심 수정: 자이로 없는 기기(탭A 등)는 gamma=0, beta=0을
-      //   항상 반환한다. 이 경우 _lastOrientTs를 갱신하지 않아야
-      //   motionHandler가 차단되지 않는다.
-      //   임계값 1° 미만이면 "실제 자이로 데이터 없음"으로 간주.
-      const hasTilt = Math.abs(gamma) > 1.0 || Math.abs(beta) > 1.0;
-      if (!hasTilt) return;   // 갱신 없이 즉시 리턴 → motionHandler 활성 유지
-
-      let gx, gy;
-      const angle = oa();
-      if (angle === 90) {
-        gx = -(beta  / 50) * 2.2;
-        gy =  (gamma / 50) * 2.2;
-      } else if (angle === -90 || angle === 270) {
-        gx =  (beta  / 50) * 2.2;
-        gy = -(gamma / 50) * 2.2;
-      } else {
-        gx = (gamma / 50) * 2.2;
-        gy = (beta  / 50) * 2.2;
-      }
-
-      this._lastOrientTs = performance.now(); // 실제 기울기가 있을 때만 갱신
-      this.gravX = gx; this.gravY = gy;
-      this.matter.world.setGravity(gx, gy);
-    };
-
-    // ── 2순위: devicemotion / accelerationIncludingGravity ──
-    //   자이로 없는 기기(탭A)의 fallback. 가속도계만으로 동작.
-    //   gyroHandler가 실제 기울기를 200ms 내에 감지했으면 건너뜀.
     this.motionHandler = (e) => {
       if (this.won) return;
-      if (performance.now() - this._lastOrientTs < 200) return;
-
       const ag = e.accelerationIncludingGravity;
       if (!ag || ag.x == null || ag.y == null) return;
 
-      // Android Chrome의 accelerationIncludingGravity 부호 규칙:
-      //   오른쪽으로 기울이면 ag.x < 0  →  gx = -ag.x (양수)
-      //   앞으로 기울이면(화면 위쪽이 내려감) ag.y < 0  →  gy = ag.y (음수 = 위 방향)
+      // Android Chrome accelerationIncludingGravity 부호:
+      //   기기를 세로로 세우면: ag.y ≈ -9.8 (중력의 반대 방향)
+      //   오른쪽으로 기울이면: ag.x ≈ -9.8
+      //   ∴ 실제 중력 방향 = -ag 방향
       const S = 2.2 / 9.8;
       let gx, gy;
       const angle = oa();
       if (angle === 90) {
+        // 가로(왼쪽이 위): 축 교환
         gx = -ag.y * S;
         gy = -ag.x * S;
       } else if (angle === -90 || angle === 270) {
+        // 가로(오른쪽이 위): 축 교환 + 부호 반전
         gx =  ag.y * S;
         gy =  ag.x * S;
       } else {
+        // 세로(기본): ag.y 음수 → gy 양수 → 아래로 낙하 ✓
         gx = -ag.x * S;
-        gy = -ag.y * S;   // 부호 반전: ag.y는 중력의 반대 방향(반발력)이므로 음수 적용
+        gy = -ag.y * S;
       }
 
       this.gravX = gx; this.gravY = gy;
       this.matter.world.setGravity(gx, gy);
     };
 
-    window.addEventListener('deviceorientation', this.gyroHandler);
-    window.addEventListener('devicemotion',      this.motionHandler);
+    window.addEventListener('devicemotion', this.motionHandler);
   }
 
   // ── Keyboard fallback (desktop) ──────────────────
